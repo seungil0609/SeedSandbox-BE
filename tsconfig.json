@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", // 최신 JavaScript(ES2022) 문법으로 컴파일
+    "module": "NodeNext", // Node.js의 최신 ESM 모듈 시스템을 따름
+    "moduleResolution": "NodeNext", // 위 module 옵션과 짝을 이룸
+    "outDir": "./dist", // 컴파일된 JavaScript 파일들을 'dist' 폴더에 저장
+
+    "esModuleInterop": true, // CommonJS 모듈을 ES 모듈처럼 가져올 수 있게 함
+    "forceConsistentCasingInFileNames": true, // 파일 이름의 대소문자를 정확히 구분하도록 강제
+
+    "strict": true, // 모든 엄격한 타입 체크 규칙 활성화
+
+    "skipLibCheck": true // 설치된 라이브러리(*.d.ts)의 타입 체크는 건너뛰어 컴파일 속도 향상
+  },
+  "include": ["src/**/*"], // 컴파일할 대상 폴더를 'src' 폴더 전체로 명시
+  "exclude": ["node_modules"] // 'node_modules' 폴더는 컴파일 대상에서 제외
+}
