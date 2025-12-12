@@ -14,7 +14,7 @@ const connectDB = async () => {
     // MongoDB에 연결 시도
     await mongoose.connect(mongoURI);
 
-    console.log("MongoDB Connected...");
+    console.log("MongoDB Connected");
   } catch (err: any) {
     // 연결 실패 시 에러 출력 후 프로세스 종료
     console.error("MongoDB connection error:", err.message);
