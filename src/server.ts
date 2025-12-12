@@ -26,6 +26,7 @@ const PORT = 8080;
 // CORS 설정
 const allowedOrigins = [
   "http://localhost:8080",
+  "http://localhost:5173",
   "https://seedsandbox.site",
   "https://seedsandbox.vercel.app",
 ];
