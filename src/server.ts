@@ -37,7 +37,7 @@ app.use("/api/portfolios", portfolioRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/transactions", transactionRoutes);
 app.use("/api/assets", assetRoutes);
-app.use("/api/ai", aiRoutes); 
+app.use("/api/ai", aiRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/posts", postRoutes);
 // app.use("/api/watchlist", watchlistRoutes); // watchlist 비활성화
@@ -45,7 +45,7 @@ app.use("/api/market-index", marketIndexRoutes);
 
 // 기본 루트 경로
 app.get("/", (req: Request, res: Response) => {
-  res.send("Hello, SeedUp Backend!");
+  res.send("Hello, SeedSandbox Backend!");
 });
 
 // 서버 실행

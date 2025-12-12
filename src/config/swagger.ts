@@ -14,7 +14,7 @@ const options = {
   definition: {
     openapi: "3.0.0",
     info: {
-      title: "SeedUp API",
+      title: "SeedSandbox API",
       version: "1.0.0",
       description: "SeedUp 서비스의 백엔드 API 명세서입니다.",
     },
@@ -22,7 +22,7 @@ const options = {
     servers: [
       {
         url: isProduction
-          ? "http://seedup-be.ap-northeast-2.elasticbeanstalk.com"
+          ? "https://seedsandbox.site"
           : "http://localhost:8080",
         description: isProduction
           ? "Production Server"
