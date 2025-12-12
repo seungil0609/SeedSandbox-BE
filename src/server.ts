@@ -23,8 +23,12 @@ connectDB();
 const app = express();
 const PORT = 8080;
 
-// CORS 미들웨어 적용
-app.use(cors());
+// CORS 설정
+const allowedOrigins = [
+  "http://localhost:8080",
+  "https://seedsandbox.site",
+  "https://seedsandbox.vercel.app",
+];
 
 app.use(express.json());
 
