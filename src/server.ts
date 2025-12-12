@@ -30,6 +30,14 @@ const allowedOrigins = [
   "https://seedsandbox.vercel.app",
 ];
 
+// CORS 미들웨어 적용
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 
 // 3. Swagger UI 라우트를 설정
