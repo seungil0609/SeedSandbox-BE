@@ -16,7 +16,7 @@ const options = {
     info: {
       title: "SeedSandbox API",
       version: "1.0.0",
-      description: "SeedUp 서비스의 백엔드 API 명세서입니다.",
+      description: "SeedSandbox 서비스의 백엔드 API 명세서입니다.",
     },
     // 2. API를 테스트할 서버 주소 (환경에 따라 동적으로 변경)
     servers: [

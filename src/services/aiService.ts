@@ -30,7 +30,7 @@ export const triggerAiAnalysis = async (portfolioId: string) => {
       return;
     }
 
-    // 데이터 간소화 
+    // 데이터 간소화
     const summaryData = transactions.map((t: any) => ({
       ticker: t.asset?.ticker,
       name: t.asset?.name,
