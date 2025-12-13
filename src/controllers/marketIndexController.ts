@@ -71,6 +71,32 @@ const rangeStartDate = (
   return start;
 };
 
+// 🟢 [추가] 날짜 채우기 함수
+const fillMissingDates = (
+  data: HistoricalPoint[],
+  start: Date,
+  end: Date
+): HistoricalPoint[] => {
+  const filled: HistoricalPoint[] = [];
+  const dateMap = new Map(data.map((d) => [d.date, d.value]));
+
+  let current = new Date(start);
+  let lastValue = data.length > 0 ? data[0].value : 0; // 초기값
+
+  while (current <= end) {
+    const dateStr = current.toISOString().split("T")[0];
+
+    if (dateMap.has(dateStr)) {
+      lastValue = dateMap.get(dateStr)!; // 데이터 있으면 갱신
+    }
+
+    // 데이터가 없으면(주말) lastValue(금요일 종가)를 그대로 사용
+    filled.push({ date: dateStr, value: lastValue });
+    current.setDate(current.getDate() + 1);
+  }
+  return filled;
+};
+
 const resolveDateRange = (
   range: string | undefined,
   startDateInput: string | undefined
@@ -105,7 +131,7 @@ const fetchIndexSeries = async (
     });
 
     const quotes = (result as any)?.quotes || [];
-    const rawPoints = quotes
+    let rawPoints = quotes
       .filter((q: any) => q.date && (q.adjClose || q.close))
       .map((q: any) => ({
         date: formatDateToYMD(new Date(q.date)),
@@ -113,6 +139,11 @@ const fetchIndexSeries = async (
       }));
 
     if (rawPoints.length === 0) return [];
+
+    // 🟢 [수정] 1일 간격일 때만 주말 데이터 채우기 (빈 날짜 메우기)
+    if (interval === "1d") {
+      rawPoints = fillMissingDates(rawPoints, startDate, endDate);
+    }
 
     // 정규화 (Normalization): 첫 데이터 기준 수익률(%)로 변환
     const baseValue = rawPoints[0].value;
