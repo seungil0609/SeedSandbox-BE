@@ -1,8 +1,8 @@
 import type { Response } from "express";
 import type { AuthRequest } from "../middleware/authMiddleware.js";
 import Transaction from "../models/Transaction.js";
+import Portfolio from "../models/Portfolio.js"; // 🟢 [추가] 기준 통화 확인용
 import yahooFinance from "../config/yahooFinance.js";
-import Portfolio from "../models/Portfolio.js";
 
 // 통계 유틸리티 함수들
 const calculateMean = (data: number[]) =>
@@ -66,7 +66,7 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
     const portfolioId = req.params.id;
     const benchmarkKey = req.query.benchmark as string | undefined;
 
-    // 🟢 1. 포트폴리오 정보 조회 (기준 통화 확인용)
+    // 1. 포트폴리오 정보 조회 (기준 통화 확인용)
     const portfolioInfo = await Portfolio.findById(portfolioId);
     const baseCurrency = portfolioInfo?.baseCurrency || "USD";
 
@@ -74,19 +74,51 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
     const transactions = await Transaction.find({
       portfolio: portfolioId,
     }).populate("asset");
+
     const holdings: Record<string, number> = {};
+    const assetSectors: Record<string, string> = {}; // 🟢 섹터 정보 저장
 
     transactions.forEach((t: any) => {
       if (!t.asset) return;
       const ticker = t.asset.ticker;
+
+      // 섹터 정보 저장 (없으면 Unknown)
+      assetSectors[ticker] = t.asset.sector || "Unknown";
+
       if (!holdings[ticker]) holdings[ticker] = 0;
       if (t.transactionType === "BUY") holdings[ticker] += t.quantity;
       else if (t.transactionType === "SELL") holdings[ticker] -= t.quantity;
     });
 
-    const tickers = Object.keys(holdings).filter((t) => holdings[t] > 0);
+    const allHoldingsTickers = Object.keys(holdings).filter(
+      (t) => holdings[t] > 0
+    );
 
-    if (tickers.length === 0) {
+    // 보유 종목 없으면 0 반환
+    if (allHoldingsTickers.length === 0) {
+      return res.status(200).json({
+        metrics: {
+          volatility: 0,
+          maxDrawdown: 0,
+          sharpeRatio: 0,
+          correlationMatrix: {},
+          beta: undefined,
+        },
+        benchmark: undefined,
+        excluded: [],
+      });
+    }
+
+    // 🟢 [1차 필터링] 섹터가 'Unknown'인 종목은 분석에서 제외
+    const sectorValidTickers = allHoldingsTickers.filter(
+      (t) => assetSectors[t] !== "Unknown"
+    );
+    const sectorExcludedTickers = allHoldingsTickers.filter(
+      (t) => assetSectors[t] === "Unknown"
+    );
+
+    // 분석할 종목이 하나도 없으면 제외 목록만 반환
+    if (sectorValidTickers.length === 0) {
       return res.status(200).json({
         metrics: {
           volatility: 0,
@@ -94,10 +126,11 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
           sharpeRatio: 0,
           correlationMatrix: {},
         },
+        excluded: sectorExcludedTickers,
       });
     }
 
-    // 3. 환율 정보 조회 (KRW=X) - 비중 계산을 위해 필수
+    // 3. 환율 정보 조회 (KRW=X) - 비중 계산용
     let usdToKrwRate = 1300; // 기본값
     try {
       const rateQuote = await yahooFinance.quote("KRW=X");
@@ -108,8 +141,8 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
       console.warn("환율 조회 실패, 기본값 사용");
     }
 
-    // 4. 과거 데이터 조회
-    let fetchTickers = [...tickers];
+    // 4. 과거 데이터 조회 (섹터가 유효한 종목만 + 벤치마크)
+    let fetchTickers = [...sectorValidTickers];
     let benchmarkTicker: string | undefined;
     let benchmarkName: string | undefined;
 
@@ -149,13 +182,21 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
       })
     );
 
-    // 5. 데이터 정제 (공통 거래일 찾기)
-    const validTickers = tickers.filter(
+    // 5. 데이터 정제 (데이터가 실제 존재하는 종목만 필터링)
+    const validTickers = sectorValidTickers.filter(
       (t) => rawHistoryData[t] && Object.keys(rawHistoryData[t]).length > 0
     );
 
-    // 🟢 [추가] 분석에서 제외된 종목 찾기 (전체 tickers 중 validTickers에 없는 것)
-    const excludedTickers = tickers.filter((t) => !validTickers.includes(t));
+    // 데이터 부족으로 제외된 종목
+    const dataMissingTickers = sectorValidTickers.filter(
+      (t) => !validTickers.includes(t)
+    );
+
+    // 🟢 [최종 제외 목록] = 섹터 미분류 + 데이터 부족
+    const finalExcludedTickers = [
+      ...sectorExcludedTickers,
+      ...dataMissingTickers,
+    ];
 
     if (validTickers.length === 0) {
       return res.status(200).json({
@@ -165,9 +206,11 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
           sharpeRatio: 0,
           correlationMatrix: {},
         },
+        excluded: finalExcludedTickers,
       });
     }
 
+    // 공통 거래일 필터링
     const checkTickers = [...validTickers];
     let hasBenchmarkData = false;
 
@@ -189,10 +232,20 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
       )
       .sort();
 
-    if (commonDates.length < 2) {
-      return res.status(200).json({ message: "데이터 부족으로 분석 불가" });
+    // 🟢 [수정] 최소 7일 데이터 필요 (안정성 확보)
+    if (commonDates.length < 7) {
+      return res.status(200).json({
+        metrics: {
+          volatility: 0,
+          maxDrawdown: 0,
+          sharpeRatio: 0,
+          correlationMatrix: {},
+        },
+        excluded: allHoldingsTickers, // 데이터 부족으로 전체 제외
+      });
     }
 
+    // 가격 및 수익률 배열 생성
     const alignedPrices: Record<string, number[]> = {};
     const returns: Record<string, number[]> = {};
 
@@ -207,7 +260,7 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
       returns[ticker] = dailyRet;
     });
 
-    // 6. 🟢 [핵심 수정] 내 포트폴리오 가중치 계산 (환율 적용)
+    // 6. 가중치(Weights) 계산 - 🟢 [핵심] 환율 적용하여 가치 통일
     let totalPortfolioValue = 0;
     const weights: Record<string, number> = {};
 
@@ -218,7 +271,7 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
       // 자산 가치 통일 (Normalization)
       let adjustedPrice = lastPrice;
 
-      // 한국 주식 판별 (티커 끝자리로 구분)
+      // 한국 주식 판별
       const isKrwAsset = t.endsWith(".KS") || t.endsWith(".KQ");
       const isUsdAsset = !isKrwAsset; // 나머지는 USD로 가정
 
@@ -254,7 +307,7 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
       portfolioReturns.push(portRet);
     }
 
-    // 지표 계산
+    // 지표 계산 (변동성, MDD, 샤프지수)
     const portMean = calculateMean(portfolioReturns);
     const portStd = calculateStdDev(portfolioReturns, portMean);
     const annualizedVolatility = portStd * Math.sqrt(252);
@@ -274,7 +327,7 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
     const sharpeRatio =
       excessStd !== 0 ? (excessMean / excessStd) * Math.sqrt(252) : 0;
 
-    // 상관계수 매트릭스
+    // 상관계수 매트릭스 계산 (validTickers 기준)
     const correlationMatrix: Record<string, Record<string, number>> = {};
     for (const t1 of validTickers) {
       correlationMatrix[t1] = {};
@@ -336,7 +389,7 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
         beta: beta,
       },
       benchmark: benchmarkResult,
-      excluded: excludedTickers, // 🟢 제외된 종목 리스트 반환
+      excluded: finalExcludedTickers, // 🟢 제외된 종목 리스트 반환
     });
   } catch (error) {
     console.error("리스크 분석 에러:", error);
