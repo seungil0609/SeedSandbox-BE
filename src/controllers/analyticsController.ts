@@ -2,6 +2,7 @@ import type { Response } from "express";
 import type { AuthRequest } from "../middleware/authMiddleware.js";
 import Transaction from "../models/Transaction.js";
 import yahooFinance from "../config/yahooFinance.js";
+import Portfolio from "../models/Portfolio.js";
 
 // 통계 유틸리티 함수들
 const calculateMean = (data: number[]) =>
@@ -63,10 +64,13 @@ const BENCHMARK_MAP: Record<string, { symbol: string; name: string }> = {
 export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
   try {
     const portfolioId = req.params.id;
-    // 선택 안 하면 undefined
     const benchmarkKey = req.query.benchmark as string | undefined;
 
-    // 1. 포트폴리오 데이터 수집
+    // 🟢 1. 포트폴리오 정보 조회 (기준 통화 확인용)
+    const portfolioInfo = await Portfolio.findById(portfolioId);
+    const baseCurrency = portfolioInfo?.baseCurrency || "USD";
+
+    // 2. 포트폴리오 데이터 수집
     const transactions = await Transaction.find({
       portfolio: portfolioId,
     }).populate("asset");
@@ -82,7 +86,6 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
 
     const tickers = Object.keys(holdings).filter((t) => holdings[t] > 0);
 
-    // 보유 종목 없으면 0 반환 (beta, benchmark 아예 생략)
     if (tickers.length === 0) {
       return res.status(200).json({
         metrics: {
@@ -90,18 +93,26 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
           maxDrawdown: 0,
           sharpeRatio: 0,
           correlationMatrix: {},
-          beta: undefined, // JSON에서 키 삭제됨
         },
-        benchmark: undefined, // JSON에서 키 삭제됨
       });
     }
 
-    // 2. 과거 데이터 조회 (내 종목 + 선택된 벤치마크)
+    // 3. 환율 정보 조회 (KRW=X) - 비중 계산을 위해 필수
+    let usdToKrwRate = 1300; // 기본값
+    try {
+      const rateQuote = await yahooFinance.quote("KRW=X");
+      if (rateQuote && rateQuote.regularMarketPrice) {
+        usdToKrwRate = rateQuote.regularMarketPrice;
+      }
+    } catch (e) {
+      console.warn("환율 조회 실패, 기본값 사용");
+    }
+
+    // 4. 과거 데이터 조회
     let fetchTickers = [...tickers];
     let benchmarkTicker: string | undefined;
     let benchmarkName: string | undefined;
 
-    // 벤치마크가 선택되었고 유효하다면 조회 목록에 추가
     if (benchmarkKey && BENCHMARK_MAP[benchmarkKey]) {
       const selectedBenchmark = BENCHMARK_MAP[benchmarkKey];
       benchmarkTicker = selectedBenchmark.symbol;
@@ -138,13 +149,11 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
       })
     );
 
-    // 3. 데이터 정제 (공통 거래일 찾기)
-    // 데이터가 존재하는 내 종목만 필터링
+    // 5. 데이터 정제 (공통 거래일 찾기)
     const validTickers = tickers.filter(
       (t) => rawHistoryData[t] && Object.keys(rawHistoryData[t]).length > 0
     );
 
-    //  유효한 종목이 하나도 없을 때 (beta, benchmark 아예 생략)
     if (validTickers.length === 0) {
       return res.status(200).json({
         metrics: {
@@ -152,17 +161,13 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
           maxDrawdown: 0,
           sharpeRatio: 0,
           correlationMatrix: {},
-          beta: undefined, // JSON에서 키 삭제됨
         },
-        benchmark: undefined, // JSON에서 키 삭제됨
       });
     }
 
-    // 공통 날짜 필터링을 위한 티커 리스트 (벤치마크 포함 여부 결정)
     const checkTickers = [...validTickers];
     let hasBenchmarkData = false;
 
-    // 벤치마크 데이터가 성공적으로 조회되었는지 확인
     if (
       benchmarkTicker &&
       rawHistoryData[benchmarkTicker] &&
@@ -172,7 +177,6 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
       hasBenchmarkData = true;
     }
 
-    // 기준 티커 설정 (날짜 추출용)
     const baseTicker = checkTickers[0];
     const baseData = rawHistoryData[baseTicker];
 
@@ -186,16 +190,13 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
       return res.status(200).json({ message: "데이터 부족으로 분석 불가" });
     }
 
-    // 가격 및 수익률 배열 생성
     const alignedPrices: Record<string, number[]> = {};
     const returns: Record<string, number[]> = {};
 
     checkTickers.forEach((ticker) => {
-      // 가격 정렬
       const prices = commonDates.map((date) => rawHistoryData[ticker][date]);
       alignedPrices[ticker] = prices;
 
-      // 수익률 계산
       const dailyRet = [];
       for (let i = 1; i < prices.length; i++) {
         dailyRet.push((prices[i] - prices[i - 1]) / prices[i - 1]);
@@ -203,21 +204,43 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
       returns[ticker] = dailyRet;
     });
 
-    // 4. 내 포트폴리오 지표 계산 (항상 수행)
+    // 6. 🟢 [핵심 수정] 내 포트폴리오 가중치 계산 (환율 적용)
     let totalPortfolioValue = 0;
     const weights: Record<string, number> = {};
 
     validTickers.forEach((t) => {
       const lastPrice = alignedPrices[t][alignedPrices[t].length - 1];
-      const val = lastPrice * holdings[t];
+      const quantity = holdings[t];
+
+      // 자산 가치 통일 (Normalization)
+      let adjustedPrice = lastPrice;
+
+      // 한국 주식 판별 (티커 끝자리로 구분)
+      const isKrwAsset = t.endsWith(".KS") || t.endsWith(".KQ");
+      const isUsdAsset = !isKrwAsset; // 나머지는 USD로 가정
+
+      // Case A: 포트폴리오(USD) & 자산(KRW) -> 나누기
+      if (baseCurrency === "USD" && isKrwAsset) {
+        adjustedPrice = lastPrice / usdToKrwRate;
+      }
+      // Case B: 포트폴리오(KRW) & 자산(USD) -> 곱하기
+      else if (baseCurrency === "KRW" && isUsdAsset) {
+        adjustedPrice = lastPrice * usdToKrwRate;
+      }
+      // Case C: 통화가 같으면 변환 없음
+
+      const val = adjustedPrice * quantity;
       totalPortfolioValue += val;
       weights[t] = val;
     });
+
+    // 비중(%) 정규화
     validTickers.forEach((t) => {
       weights[t] =
         totalPortfolioValue > 0 ? weights[t] / totalPortfolioValue : 0;
     });
 
+    // 포트폴리오 수익률 계산
     const portfolioReturns = [];
     const days = returns[validTickers[0]].length;
     for (let i = 0; i < days; i++) {
@@ -228,7 +251,7 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
       portfolioReturns.push(portRet);
     }
 
-    //  변동성, MDD, 샤프지수
+    // 지표 계산
     const portMean = calculateMean(portfolioReturns);
     const portStd = calculateStdDev(portfolioReturns, portMean);
     const annualizedVolatility = portStd * Math.sqrt(252);
@@ -241,7 +264,6 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
     }
     const maxDrawdown = calculateMaxDrawdown(portValues);
 
-    // 무위험 이자율 4.14% 반영
     const riskFreeRate = 0.0414 / 252;
     const excessReturns = portfolioReturns.map((r) => r - riskFreeRate);
     const excessMean = calculateMean(excessReturns);
@@ -249,7 +271,7 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
     const sharpeRatio =
       excessStd !== 0 ? (excessMean / excessStd) * Math.sqrt(252) : 0;
 
-    // 상관계수 매트릭스: 벤치마크와 상관없이 내 종목들끼리 계산 (항상 수행)
+    // 상관계수 매트릭스
     const correlationMatrix: Record<string, Record<string, number>> = {};
     for (const t1 of validTickers) {
       correlationMatrix[t1] = {};
@@ -263,10 +285,9 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // 5. 벤치마크 관련 지표 (선택 + 데이터 존재 시에만 수행)
-    // 값이 없으면 JSON에서 아예 사라짐 (Optional Pattern)
+    // 벤치마크 비교 (베타 등)
     let beta: number | undefined;
-    let benchmarkResult: any; // undefined
+    let benchmarkResult: any;
 
     if (hasBenchmarkData && benchmarkTicker) {
       const benchRets = returns[benchmarkTicker];
@@ -274,7 +295,6 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
       const benchStd = calculateStdDev(benchRets, benchMean);
       const benchVariance = Math.pow(benchStd, 2);
 
-      // 베타 계산
       const covariance = calculateCovariance(
         portfolioReturns,
         portMean,
@@ -283,7 +303,6 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
       );
       beta = benchVariance !== 0 ? covariance / benchVariance : 0;
 
-      // 벤치마크 자체 지표 (비교용)
       // 벤치마크 샤프지수
       const benchExcessReturns = benchRets.map((r) => r - riskFreeRate);
       const benchExcessMean = calculateMean(benchExcessReturns);
@@ -310,10 +329,10 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
         volatility: annualizedVolatility,
         maxDrawdown: maxDrawdown,
         sharpeRatio: sharpeRatio,
-        correlationMatrix: correlationMatrix, 
-        beta: beta, 
+        correlationMatrix: correlationMatrix,
+        beta: beta,
       },
-      benchmark: benchmarkResult, 
+      benchmark: benchmarkResult,
     });
   } catch (error) {
     console.error("리스크 분석 에러:", error);

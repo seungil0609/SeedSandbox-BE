@@ -348,6 +348,7 @@ export const getPortfolioSummary = async (req: AuthRequest, res: Response) => {
     const assetHoldings: any = {};
     const tickers: string[] = [];
 
+    // 1. 보유 수량 및 평단가 계산
     transactions.forEach((t: any) => {
       if (!t.asset) return;
       const ticker = t.asset.ticker;
@@ -387,17 +388,19 @@ export const getPortfolioSummary = async (req: AuthRequest, res: Response) => {
     });
 
     const priceMap = new Map<string, number>();
-    let exchangeRate = 1;
+    let exchangeRate = 1300; // 기본값 안전장치
 
+    // 2. 현재가 및 환율 조회
     if (activeTickers.length > 0) {
       const symbolsToFetch = [...activeTickers];
-      if (baseCurrency === "KRW") symbolsToFetch.push("KRW=X");
+      // 🟢 [수정] 환율 정보를 항상 가져오도록 추가 (KRW=X: 달러 대비 원화 환율)
+      symbolsToFetch.push("KRW=X");
 
       try {
         const results = await yf.quote(symbolsToFetch);
         const quotes = Array.isArray(results) ? results : [results];
         quotes.forEach((q: any) => {
-          if (q.symbol === "KRW=X") exchangeRate = q.regularMarketPrice || 1;
+          if (q.symbol === "KRW=X") exchangeRate = q.regularMarketPrice || 1300;
           else priceMap.set(q.symbol, q.regularMarketPrice || 0);
         });
       } catch (e: any) {
@@ -409,16 +412,26 @@ export const getPortfolioSummary = async (req: AuthRequest, res: Response) => {
     let currentValuation = 0;
 
     const sectorValueMap: Record<string, number> = {};
-
     const assetsSummary = [];
 
+    // 3. 자산별 가치 계산 (환율 적용)
     for (const ticker of activeTickers) {
       const holding = assetHoldings[ticker];
       const currentPrice =
         priceMap.get(ticker) || holding.totalCost / holding.qty || 0;
 
-      const applyRate =
-        holding.currency === "USD" && baseCurrency === "KRW" ? exchangeRate : 1;
+      // 🟢 [핵심 수정] 양방향 환율 적용 로직
+      let applyRate = 1;
+
+      // Case A: 내 포폴(KRW)인데 자산이 달러(USD) -> 곱하기 (환전)
+      if (baseCurrency === "KRW" && holding.currency === "USD") {
+        applyRate = exchangeRate;
+      }
+      // Case B: 내 포폴(USD)인데 자산이 원화(KRW) -> 나누기 (역환전)
+      else if (baseCurrency === "USD" && holding.currency === "KRW") {
+        applyRate = 1 / exchangeRate;
+      }
+      // Case C: 통화가 같으면 1 (그대로)
 
       const valuation = holding.qty * currentPrice * applyRate;
       const adjustedCost = holding.totalCost * applyRate;
@@ -426,6 +439,7 @@ export const getPortfolioSummary = async (req: AuthRequest, res: Response) => {
       totalInvestment += adjustedCost;
       currentValuation += valuation;
 
+      // 섹터 비중 계산
       let weights = holding.sectorWeights;
       if (weights instanceof Map) {
         weights = Object.fromEntries(weights);
@@ -453,7 +467,7 @@ export const getPortfolioSummary = async (req: AuthRequest, res: Response) => {
         averagePrice: holding.totalCost / holding.qty,
         currentPrice,
         currency: holding.currency,
-        totalValue: valuation,
+        totalValue: valuation, // 환산된 가치
         returnRate:
           adjustedCost > 0
             ? ((valuation - adjustedCost) / adjustedCost) * 100
