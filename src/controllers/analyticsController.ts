@@ -154,6 +154,9 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
       (t) => rawHistoryData[t] && Object.keys(rawHistoryData[t]).length > 0
     );
 
+    // 🟢 [추가] 분석에서 제외된 종목 찾기 (전체 tickers 중 validTickers에 없는 것)
+    const excludedTickers = tickers.filter((t) => !validTickers.includes(t));
+
     if (validTickers.length === 0) {
       return res.status(200).json({
         metrics: {
@@ -333,6 +336,7 @@ export const getRiskMetrics = async (req: AuthRequest, res: Response) => {
         beta: beta,
       },
       benchmark: benchmarkResult,
+      excluded: excludedTickers, // 🟢 제외된 종목 리스트 반환
     });
   } catch (error) {
     console.error("리스크 분석 에러:", error);
