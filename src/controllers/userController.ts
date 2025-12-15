@@ -126,3 +126,34 @@ export const logoutUser = async (req: AuthRequest, res: Response) => {
       .json({ message: "로그아웃 처리 중 서버 에러가 발생했습니다." });
   }
 };
+
+// 🟢 [추가] 가입 전 중복 확인 전용 함수
+export const checkDuplicate = async (req: Request, res: Response) => {
+  const { email, nickname } = req.body;
+
+  try {
+    // 1. 이메일 중복 체크
+    if (email) {
+      const userByEmail = await User.findOne({ email });
+      if (userByEmail) {
+        return res.status(409).json({ message: "이미 가입된 이메일입니다." });
+      }
+    }
+
+    // 2. 닉네임 중복 체크
+    if (nickname) {
+      const userByNickname = await User.findOne({ nickname });
+      if (userByNickname) {
+        return res
+          .status(409)
+          .json({ message: "이미 사용 중인 닉네임입니다." });
+      }
+    }
+
+    // 문제 없으면 200 OK
+    res.status(200).json({ message: "사용 가능한 정보입니다." });
+  } catch (error) {
+    console.error("중복 확인 에러:", error);
+    res.status(500).json({ message: "서버 에러" });
+  }
+};
