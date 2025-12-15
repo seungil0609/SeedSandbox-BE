@@ -4,7 +4,8 @@ import {
   registerUser,
   getUserProfile,
   deleteUser,
-  logoutUser, 
+  logoutUser,
+  checkDuplicate, // 🟢 [1] 컨트롤러 불러오기
 } from "../controllers/userController.js";
 import { protect } from "../middleware/authMiddleware.js";
 
@@ -121,5 +122,6 @@ router.delete("/profile", protect, deleteUser);
  */
 
 router.post("/logout", protect, logoutUser);
+router.post("/check", checkDuplicate);
 
 export default router;
