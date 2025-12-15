@@ -14,12 +14,19 @@ export const registerUser = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "모든 필드를 입력해주세요." });
     }
 
-    // 이미 가입된 이메일이나 닉네임인지 확인
-    const existingUser = await User.findOne({ $or: [{ email }, { nickname }] });
-    if (existingUser) {
-      return res
-        .status(409)
-        .json({ message: "이미 사용 중인 이메일 또는 닉네임입니다." });
+    // 🟢 [수정] 이메일과 닉네임을 따로 체크하여 구체적인 에러 메시지 반환
+
+    // 1. 이메일 중복 체크
+    const userByEmail = await User.findOne({ email });
+    if (userByEmail) {
+      return res.status(409).json({ message: "이미 가입된 이메일입니다." });
+    }
+
+    // 2. 닉네임 중복 체크
+    const userByNickname = await User.findOne({ nickname });
+    if (userByNickname) {
+      // 프론트엔드에서 '닉네임'이라는 단어를 감지하므로 메시지에 포함 필수
+      return res.status(409).json({ message: "이미 사용 중인 닉네임입니다." });
     }
 
     // 새 사용자 정보 생성
@@ -53,12 +60,9 @@ export const registerUser = async (req: Request, res: Response) => {
 // @route   GET /api/users/profile
 // @access  Private (로그인한 사용자만 접근 가능)
 export const getUserProfile = async (req: AuthRequest, res: Response) => {
-  // 'protect'가 성공적으로 통과했다면,
-  // req.user에는 반드시 DB에서 찾은 사용자 정보가 들어있을 것임
   const user = req.user;
 
   if (user) {
-    // 사용자 정보에서 민감한 정보를 제외하고 필요한 것만 보내줌
     res.status(200).json({
       id: user._id,
       email: user.email,
@@ -75,21 +79,18 @@ export const getUserProfile = async (req: AuthRequest, res: Response) => {
 // @access  Private
 export const deleteUser = async (req: AuthRequest, res: Response) => {
   try {
-    // 1. 'protect'를 통과한 사용자 정보를 가져옴
     const userInDb = req.user;
 
-    // 2. 만약 DB에 사용자가 없다면, 에러 처리
     if (!userInDb) {
       return res.status(404).json({ message: "사용자를 찾을 수 없습니다." });
     }
 
-    // 3. Firebase Authentication에서 사용자를 삭제
+    // Firebase Authentication에서 사용자 삭제
     await admin.auth().deleteUser(userInDb.firebaseUid);
 
-    // 4. DB에서 사용자를 삭제
+    // DB에서 사용자 삭제
     await User.findByIdAndDelete(userInDb._id);
 
-    // 5. 성공 메시지 응답
     res.status(200).json({ message: "회원 탈퇴가 성공적으로 처리되었습니다." });
   } catch (error) {
     console.error("회원 탈퇴 에러:", error);
@@ -104,7 +105,6 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
 // @access  Private
 export const logoutUser = async (req: AuthRequest, res: Response) => {
   try {
-    // 1. 미들웨어를 통과한 유저 정보 가져오기
     const user = req.user;
 
     if (!user) {
@@ -113,11 +113,9 @@ export const logoutUser = async (req: AuthRequest, res: Response) => {
         .json({ message: "사용자 정보를 찾을 수 없습니다." });
     }
 
-    // 2. Firebase Admin SDK를 통해 해당 유저(UID)의 Refresh Token을 모두 무효화(Revoke)
-    //    이렇게 하면 해커가 가진 Refresh Token으로 더 이상 새 Access Token을 발급받을 수 없습니다.
+    // Refresh Token 무효화
     await admin.auth().revokeRefreshTokens(user.firebaseUid);
 
-    // 3. 성공 응답
     res
       .status(200)
       .json({ message: "로그아웃 되었습니다. (토큰 무효화 완료)" });
