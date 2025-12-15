@@ -24,7 +24,7 @@ export const triggerAiAnalysis = async (portfolioId: string) => {
 
     if (transactions.length === 0) {
       await Portfolio.findByIdAndUpdate(portfolioId, {
-        aiSummary: "거래 내역이 없습니다. 자산을 추가해주시면 분석해드립니다.",
+        aiSummary: "거래내역이 없습니다.",
         isAnalyzing: false,
       });
       return;
@@ -47,12 +47,10 @@ export const triggerAiAnalysis = async (portfolioId: string) => {
 
       **제약 사항 (필수 준수):**
       1. 한국어로 작성하세요.
-      2. 전체 길이는 공백 포함 **300자 이내**로 제한합니다. (모바일 화면 400px 높이 제한)
-      3. 줄글이 아닌 **'•' (불렛 포인트)** 형식을 사용하여 3~4줄로 작성하세요.
-      4. 구성: 
-         - 현재 포트폴리오 성향 한 줄 요약
-         - 주요 리스크 또는 특징 1~2가지
-         - 향후 투자 조언 1가지
+      2. 전체 길이는 공백 포함 **200자~300자 이내**로 작성하세요.
+      3. **절대로 개조식이나 불렛 포인트('•', '-')를 사용하지 마세요.**
+      4. **자연스러운 평어체 줄글(문장)**로 이어지게 작성하세요. (~합니다 체)
+      5. 구성: 포트폴리오의 전반적인 성향을 먼저 언급하고, 주요 리스크나 특징을 설명한 뒤, 향후 조언으로 마무리하세요.
 
       **포트폴리오 정보:**
       - 기준 통화: ${portfolio.baseCurrency}
