@@ -29,46 +29,10 @@ Architecture highlights:
 
 ---
 
-## Database Schema (Text-based ERD)
+## Database Schema
 
-Entities and relationships (concise ERD):
-
-- User
-
-  - \_id: ObjectId
-  - uid: string (Firebase UID)
-  - email: string
-  - displayName: string
-  - portfolios: [Portfolio._id] // 1:N relationship
-
-- Portfolio
-
-  - \_id: ObjectId
-  - user: User.\_id (owner)
-  - name: string
-  - baseCurrency: string
-  - holdings: [{ symbol: string, quantity: number, avgPrice: number }] // denormalized snapshot
-  - totalValue: number
-  - createdAt, updatedAt
-  - transactions: [Transaction._id] // 1:N relationship
-
-- Transaction
-
-  - \_id: ObjectId
-  - portfolio: Portfolio.\_id
-  - user: User.\_id
-  - symbol: string
-  - type: 'BUY' | 'SELL'
-  - quantity: number
-  - price: number (executed price)
-  - date: Date
-  - fees: number
-
-- Asset (reference catalog)
-  - symbol: string (PK)
-  - name: string
-  - market: 'US' | 'KR' | ...
-  - latestQuote: { date, open, high, low, close, volume }
+Entities and relationships:
+<img width="744" height="706" alt="Image" src="https://github.com/user-attachments/assets/055d4810-90d7-4a7a-b114-6982dd4b501e" />
 
 Relationships summary:
 
