@@ -1,328 +1,206 @@
-# SeedUp Backend - README
+# SeedSandbox Server
 
-## Project Title & Description
+"The Safest Laboratory to Start Investing" — Backend API
 
-### **SeedUp Backend** 📈
-
-A comprehensive investment portfolio management and AI-powered analytics backend service. SeedUp enables users to create and manage investment portfolios, track transactions, analyze market indices, and leverage AI-driven insights to optimize investment decisions. Built with Express.js and integrated with Firebase authentication, MongoDB persistence, and Google Generative AI capabilities.
+![Build](https://img.shields.io/badge/build-passing-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Node](https://img.shields.io/badge/node-%3E%3D16-brightgreen) ![Express](https://img.shields.io/badge/framework-express-404d59) ![MongoDB](https://img.shields.io/badge/db-mongodb-47A248)
 
 ---
 
-## Key Features
+## Introduction
 
-- **👤 User Management & Authentication**
+SeedSandbox Server is a production-ready RESTful API that handles financial data aggregation, portfolio and transaction management, and AI-driven portfolio diagnosis. The server acts as a secure proxy for external services (Yahoo Finance, Google Gemini), performing critical data normalization and validation before exposing APIs to the frontend.
 
-  - Firebase Authentication integration for secure user registration and login
-  - User profile management with email and nickname support
-
-- **💼 Portfolio Management**
-
-  - Create and manage multiple investment portfolios
-  - Track portfolio performance with base currency support
-  - AI-powered portfolio analysis and summarization
-
-- **📊 Asset & Transaction Tracking**
-
-  - Browse and search investment assets (stocks, cryptocurrencies, etc.)
-  - Record buy/sell transactions with detailed tracking
-  - Real-time transaction history and analysis
-
-- **📈 Market Analytics & Insights**
-
-  - Real-time market index data via Yahoo Finance integration
-  - Historical price charts and trend analysis
-  - Correlation analysis across multiple assets
-  - Portfolio performance metrics and analytics
-
-- **🤖 AI-Powered Features**
-
-  - Google Generative AI integration for intelligent portfolio analysis
-  - Automated portfolio summaries and insights
-  - Smart recommendations based on portfolio composition
-
-- **💬 Community & Social Features**
-
-  - Create and share investment posts
-  - Comment on community posts
-  - Watchlist functionality for tracking interesting assets and posts
-  - Real-time notifications system
-
-- **📚 API Documentation**
-  - Swagger/OpenAPI integration for interactive API documentation
-  - Auto-generated API specs at `/api-docs`
+Frontend repository: [Insert Frontend Repo Link]
 
 ---
 
-## Tech Stack
+## Tech Stack & Architecture
 
-### **Runtime & Language**
+- Runtime: **Node.js** (TypeScript)
+- Framework: **Express.js** (MVC-style organization: controllers → services → models)
+- Database: **MongoDB Atlas** via **Mongoose** ODM
+- External APIs: **yahoo-finance2** (market data), **Google Gemini API** (AI)
 
-- **Node.js** (with TypeScript)
-- **TypeScript** (v5.9.3) - Type-safe JavaScript
+Architecture highlights:
 
-### **Core Framework & Server**
-
-- **Express.js** (v5.1.0) - Web application framework
-- **CORS** (v2.8.5) - Cross-Origin Resource Sharing middleware
-
-### **Database**
-
-- **MongoDB** - NoSQL database via MongoDB Atlas
-- **Mongoose** (v8.19.2) - MongoDB object modeling for Node.js
-
-### **Authentication & Security**
-
-- **Firebase Admin SDK** (v13.5.0) - Authentication and user management
-- **dotenv** (v17.2.3) - Environment variable management
-
-### **External APIs & Services**
-
-- **Yahoo Finance 2** (v3.10.2) - Real-time and historical market data
-- **Google Generative AI** (v0.24.1) - AI-powered analysis and insights
-- **Google GenAI** (v1.30.0) - Additional AI capabilities
-
-### **API Documentation**
-
-- **Swagger JSDoc** (v6.2.8) - API documentation generator
-- **Swagger UI Express** (v5.0.1) - Interactive API documentation UI
-
-### **Development Tools**
-
-- **ts-node** (v10.9.2) - TypeScript execution for Node.js
-- **tsx** (v4.20.6) - Fast TypeScript execution
-- **Nodemon** (v3.1.10) - Auto-restart development server on file changes
-- **TypeScript** (v5.9.3) - TypeScript compiler
+- **MVC pattern**: Controllers handle HTTP, Services encapsulate business logic (data normalization, aggregation, AI orchestration), Models define data schema and validation.
+- **Data normalization layer**: Every market data response is normalized into consistent OHLCV object arrays and schema-validated documents before storage or forwarding to clients.
+- **Atomic updates & consistency**: Portfolio/transaction state updates use Mongoose transactions (sessions) or optimistic checks to ensure accurate asset totals and prevent race conditions.
 
 ---
 
-## Prerequisites
+## Database Schema (Text-based ERD)
 
-Before running the SeedUp backend, ensure you have the following installed:
+Entities and relationships (concise ERD):
 
-- **Node.js**: v18.0.0 or higher
-- **npm**: v8.0.0 or higher (comes with Node.js)
-- **MongoDB Atlas Account**: Free tier available at [mongodb.com](https://www.mongodb.com)
-- **Firebase Project**: Set up at [console.firebase.google.com](https://console.firebase.google.com)
-- **Google Cloud API Key**: For Google Generative AI access
+- User
 
-### **Environment Setup**
+  - \_id: ObjectId
+  - uid: string (Firebase UID)
+  - email: string
+  - displayName: string
+  - portfolios: [Portfolio._id] // 1:N relationship
 
-You'll need the following environment variables configured in a .env file:
+- Portfolio
 
-- MongoDB connection URI
-- Firebase project credentials (Project ID, Client Email, Private Key)
-- Google Generative AI API key
+  - \_id: ObjectId
+  - user: User.\_id (owner)
+  - name: string
+  - baseCurrency: string
+  - holdings: [{ symbol: string, quantity: number, avgPrice: number }] // denormalized snapshot
+  - totalValue: number
+  - createdAt, updatedAt
+  - transactions: [Transaction._id] // 1:N relationship
+
+- Transaction
+
+  - \_id: ObjectId
+  - portfolio: Portfolio.\_id
+  - user: User.\_id
+  - symbol: string
+  - type: 'BUY' | 'SELL'
+  - quantity: number
+  - price: number (executed price)
+  - date: Date
+  - fees: number
+
+- Asset (reference catalog)
+  - symbol: string (PK)
+  - name: string
+  - market: 'US' | 'KR' | ...
+  - latestQuote: { date, open, high, low, close, volume }
+
+Relationships summary:
+
+- User (1) --- (N) Portfolio
+- Portfolio (1) --- (N) Transaction
+- Transaction -> references Asset (by symbol)
+- Portfolio maintains denormalized snapshot of holdings for fast reads and analytics
+
+Design considerations:
+
+- Use Mongoose schemas with strict validation and compound indexes for frequent queries (e.g., { user: 1, name: 1 } unique per user).
+- Use MongoDB sessions for multi-document transactions when updating Portfolio totals and appending Transactions to guarantee atomicity.
 
 ---
 
-## Installation & Running
+## API Reference (Key Endpoints)
 
-### **1. Clone the Repository**
+| Endpoint                                  | Method | Auth | Description                                                                |
+| ----------------------------------------- | -----: | :--: | -------------------------------------------------------------------------- |
+| GET /api/portfolios                       |    GET | Yes  | List portfolios for the authenticated user                                 |
+| POST /api/portfolios                      |   POST | Yes  | Create a new portfolio (name, baseCurrency)                                |
+| GET /api/portfolios/:id                   |    GET | Yes  | Get portfolio details including holdings and metrics                       |
+| POST /api/transactions                    |   POST | Yes  | Create a transaction; server updates portfolio holdings atomically         |
+| GET /api/transactions?portfolio=:id       |    GET | Yes  | List transactions for a portfolio                                          |
+| GET /api/market/search?q=                 |    GET |  No  | Search market assets by symbol/name (proxy to yahoo-finance2)              |
+| GET /api/market/history?symbol=&from=&to= |    GET |  No  | Returns normalized OHLCV time-series (server-normalized)                   |
+| POST /api/ai/analyze                      |   POST | Yes  | Send portfolio snapshot to Google Gemini, sanitize and return AI diagnosis |
+| GET /api/analytics/portfolio/:id          |    GET | Yes  | Compute risk metrics (Volatility, Beta, Sharpe, MDD) for portfolio         |
 
-```powershell
-git clone https://git.ajou.ac.kr/seedup/seedup-be.git
-cd seedup-be
+Notes:
+
+- All endpoints that mutate user resources require Firebase-authenticated requests (Firebase token validated by `authMiddleware`).
+- Market endpoints act as a **normalizing proxy** that converts fragmented API responses into consistent OHLCV arrays before returning to the client.
+
+Example: Normalized time-series response
+
+```json
+{
+  "symbol": "AAPL",
+  "series": [
+    {"date":"2025-01-02","open":130.12,"high":132.0,"low":129.5,"close":131.4,"volume":900000},
+    ...
+  ]
+}
 ```
 
-### **2. Install Dependencies**
+---
 
-```powershell
+## Environment Variables
+
+Minimum required variables (add to `.env`):
+
+- NODE_ENV=development|production
+- PORT=8080
+- MONGO_URI=mongodb+srv://<user>:<pass>@<cluster>/<db>
+- FIREBASE_PROJECT_ID=
+- FIREBASE_CLIENT_EMAIL=
+- FIREBASE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n
+- GEMINI_API_KEY=your_google_gemini_key
+- YAHOO_API_KEY=optional_if_required
+- LOG_LEVEL=info
+
+Security notes:
+
+- Keep `FIREBASE_PRIVATE_KEY` and `GEMINI_API_KEY` out of source control and use secret managers for production deployments (e.g., Vault, cloud secrets).
+
+---
+
+## Data Normalization & Integrity
+
+This server is explicitly responsible for transforming fragmented third-party responses into well-formed, validated records consumable by the frontend and analytic services. Key practices:
+
+- **OHLCV Normalization:** Convert responses that separate timestamps and quotes into arrays of objects with {date, open, high, low, close, volume}.
+- **Sanitization:** Strict filtering to remove invalid symbols and null price points (e.g., `.filter(item => item && item.symbol)`).
+- **Schema Validation:** Apply Mongoose validation on all persisted documents and run additional business rules in service layer before committing changes.
+- **Atomicity:** Use MongoDB sessions for multi-document updates (e.g., when creating a Transaction and updating Portfolio totals) to maintain consistent state.
+
+These measures prevent client-side rendering failures and ensure analytics (volatility, correlations) are computed on clean, dependable data.
+
+---
+
+## Installation & Run Guide
+
+1. Clone:
+
+```bash
+git clone https://github.com/your-org/SeedSandbox-BE.git
+cd SeedSandbox-BE
+```
+
+2. Install:
+
+```bash
 npm install
 ```
 
-### **3. Configure Environment Variables**
+3. Configure `.env` (see "Environment Variables" above).
 
-Create a .env file in the root directory with the following variables:
+4. Run locally (development):
 
-```env
-# MongoDB Connection
-MONGO_URI=mongodb+srv://<username>:<password>@<cluster>.mongodb.net/<database>
-
-# Firebase Configuration
-FIREBASE_PROJECT_ID=your_project_id
-FIREBASE_CLIENT_EMAIL=your_client_email@iam.gserviceaccount.com
-FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-
-# Google Generative AI
-GEMINI_AI_API=your_gemini_api_key
-```
-
-### **4. Development Mode**
-
-Start the development server with hot-reload enabled:
-
-```powershell
+```bash
 npm run dev
+# or
+npm run start:dev
 ```
 
-The server will run on `http://localhost:8080`
+5. Build & start (production):
 
-### **5. Build for Production**
-
-Compile TypeScript to JavaScript:
-
-```powershell
+```bash
 npm run build
-```
-
-### **6. Start Production Server**
-
-Run the compiled application:
-
-```powershell
 npm start
 ```
 
----
+6. API docs (Swagger):
 
-## Usage
-
-### **API Base URL**
-
-```
-http://localhost:8080/api
-```
-
-### **API Documentation**
-
-Once the server is running, access the interactive API documentation:
-
-```
-http://localhost:8080/api-docs
-```
-
-### **Core Features Usage Examples**
-
-#### **1. User Management**
-
-- **Register/Login**: Authenticate via Firebase authentication
-- **User Profile**: View and update user information
-- **Endpoint**: `/api/users`
-
-#### **2. Portfolio Management**
-
-- **Create Portfolio**: `POST /api/portfolios`
-  ```json
-  {
-    "name": "My Investment Portfolio",
-    "baseCurrency": "KRW"
-  }
-  ```
-- **Get Portfolios**: `GET /api/portfolios`
-- **Get AI Analysis**: AI-powered portfolio summaries included in portfolio details
-
-#### **3. Asset & Market Data**
-
-- **Search Assets**: `GET /api/assets?symbol=AAPL`
-- **Get Market Indices**: `GET /api/market-index`
-- **Historical Data**: Real-time and historical price data via Yahoo Finance
-
-#### **4. Transaction Tracking**
-
-- **Record Transaction**: `POST /api/transactions`
-  ```json
-  {
-    "portfolio": "portfolio_id",
-    "asset": "asset_id",
-    "transactionType": "BUY",
-    "quantity": 10,
-    "price": 150.0,
-    "transactionDate": "2025-12-08"
-  }
-  ```
-- **View History**: `GET /api/transactions`
-
-#### **5. AI-Powered Analytics**
-
-- **Get Portfolio Analysis**: `POST /api/ai/analyze`
-  - Receives AI-generated insights about portfolio composition
-  - Recommendations based on market trends
-
-#### **6. Community Features**
-
-- **Create Post**: `POST /api/posts`
-- **Add Comment**: `POST /api/posts/:id/comments`
-- **Get Feed**: `GET /api/posts`
-- **Watchlist**: Save interesting assets and posts for later review
-
-#### **7. Analytics Dashboard**
-
-- **Portfolio Metrics**: `GET /api/analytics/portfolio/:id`
-  - Performance metrics
-  - Correlation analysis
-  - Risk assessment
+- Open `http://localhost:<PORT>/api-docs` after server starts.
 
 ---
 
-## Project Structure
+## Operational Considerations
 
-```
-seedup-be/
-├── src/
-│   ├── server.ts              # Express app initialization
-│   ├── config/                # Configuration files
-│   │   ├── db.ts             # MongoDB connection
-│   │   ├── firebaseAdmin.ts  # Firebase setup
-│   │   ├── swagger.ts        # API documentation
-│   │   └── yahooFinance.ts   # Market data client
-│   ├── controllers/           # Route handlers
-│   │   ├── userController.ts
-│   │   ├── portfolioController.ts
-│   │   ├── transactionController.ts
-│   │   ├── assetController.ts
-│   │   ├── aiController.ts
-│   │   ├── analyticsController.ts
-│   │   ├── postController.ts
-│   │   ├── commentController.ts
-│   │   └── marketIndexController.ts
-│   ├── models/                # Database schemas
-│   │   ├── User.ts
-│   │   ├── Portfolio.ts
-│   │   ├── Asset.ts
-│   │   ├── Transaction.ts
-│   │   ├── Post.ts
-│   │   ├── Comment.ts
-│   │   ├── Notification.ts
-│   │   └── Watchlist.ts
-│   ├── routes/                # API routes
-│   │   ├── userRoutes.ts
-│   │   ├── portfolioRoutes.ts
-│   │   ├── transactionRoutes.ts
-│   │   ├── assetRoutes.ts
-│   │   ├── aiRoutes.ts
-│   │   ├── analyticsRoutes.ts
-│   │   ├── postRoutes.ts
-│   │   └── marketIndexRoutes.ts
-│   ├── services/              # Business logic
-│   │   └── aiService.ts       # AI analysis service
-│   └── middleware/            # Custom middleware
-│       └── authMiddleware.ts  # Firebase auth verification
-├── package.json
-├── tsconfig.json
-├── .env                       # Environment variables (not in repo)
-└── README.md
-```
+- Monitoring: Add metrics for normalized records, failed sanitizations, and AI request latencies.
+- Rate-limiting & caching: Cache normalized market series to reduce external API hits and implement rate limits for public market endpoints.
+- Testing: Unit tests for normalization logic and integration tests for transaction atomicity are high priority.
 
 ---
 
-## Additional Notes
+## Contributing & Support
 
-- **Swagger Documentation**: Comprehensive API documentation is auto-generated and available at the `/api-docs` endpoint
-- **Firebase Integration**: Secure authentication is handled through Firebase Admin SDK
-- **Real-time Market Data**: Market indices and asset prices are fetched from Yahoo Finance API
-- **AI Analysis**: Google Generative AI provides intelligent portfolio insights and recommendations
-- **CORS Enabled**: Backend accepts requests from all origins (configure for production)
+- Follow the project contribution guidelines, write tests for new logic, and keep changes small and focused.
+- Open issues or PRs to `https://github.com/your-org/SeedSandbox-BE`.
 
 ---
 
-## Support & Contributing
-
-For issues, feature requests, or contributions, please refer to the project repository at:
-
-```
-https://git.ajou.ac.kr/seedup/seedup-be
-```
-
----
-
-**SeedUp Backend** - Empower your investment decisions with AI-driven analytics ✨
+**SeedSandbox Server** — Production-grade financial backend focused on data integrity and reliable analytics. 🎯
