@@ -2,38 +2,40 @@ import yahooFinance from "yahoo-finance2";
 
 const YahooFinanceClass = (yahooFinance as any).default || yahooFinance;
 
+// 인스턴스 생성
 const yf = new YahooFinanceClass({
   fetchOptions: {
     headers: {
-      // 1. 최신 맥북 크롬으로 위장
       "User-Agent":
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-
-      // 2. [추가] 브라우저가 보내는 필수 헤더들 (이게 없으면 로봇으로 의심받음)
-      Accept:
-        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-      "Accept-Encoding": "gzip, deflate, br",
-      "Accept-Language": "en-US,en;q=0.9,ko;q=0.8",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-      "Upgrade-Insecure-Requests": "1",
-      "Sec-Fetch-Dest": "document",
-      "Sec-Fetch-Mode": "navigate",
-      "Sec-Fetch-Site": "none",
-      "Sec-Fetch-User": "?1",
-      Pragma: "no-cache",
     },
   },
+  // 🟢 [추가] 쿠키 저장소 활성화 (메모리에 저장)
+  cookieJar: new (yahooFinance as any).default.CookieJar(),
   queue: {
     concurrency: 1,
     limit: 1,
-    interval: 2000, // 2초 (여유 있게)
+    interval: 2000,
   },
   validation: {
     logErrors: false,
     logOptionsErrors: false,
   },
 });
+
+// 🟢 [핵심] 서버 켜질 때 "Crumb(인증 조각)" 받아오기
+(async () => {
+  try {
+    console.log("Yahoo Finance 인증 준비 중...");
+    // 야후 메인 페이지를 찔러서 쿠키와 Crumb를 받아옴
+    await yf.setGlobalConfig({
+      cookieJar: new (yahooFinance as any).default.CookieJar(),
+    });
+    console.log("Yahoo Finance 인증 성공!");
+  } catch (e) {
+    console.error("Yahoo Finance 인증 실패:", e);
+  }
+})();
 
 if (typeof yf.suppressNotices === "function") {
   yf.suppressNotices(["yahooSurvey", "ripHistorical"]);
