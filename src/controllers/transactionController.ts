@@ -3,11 +3,12 @@ import { Types } from "mongoose";
 import Transaction from "../models/Transaction.js";
 import Portfolio from "../models/Portfolio.js";
 import Asset from "../models/Asset.js";
-import { createRequire } from "module";
+// 🟢 [수정] createRequire 삭제 및 import 통일
+import yahooFinance from "../config/yahooFinance.js";
 import { triggerAiAnalysis } from "../services/aiService.js";
 
-const require = createRequire(import.meta.url);
-const YahooFinance = require("yahoo-finance2").default;
+// 🟢 [추가] 타입 에러 방지용 (가장 안전한 방법)
+const yf = yahooFinance as any;
 
 // 유틸리티: 섹터 이름 포맷팅
 const formatSectorName = (rawName: string) => {
@@ -41,11 +42,11 @@ export const addTransaction: RequestHandler = async (
       return res.status(401).json({ message: "권한 없음" });
     }
 
-    const yf = new YahooFinance();
     let detectedCurrency = "USD";
     let foundItem = null;
 
     try {
+      // 🟢 [수정] yf 변수 사용
       const quote = await yf.quote(assetTicker);
       if (quote) {
         detectedCurrency = quote.currency || "USD";
@@ -61,6 +62,7 @@ export const addTransaction: RequestHandler = async (
       console.log(`[Auto-Asset] '${assetTicker}' 신규 등록 시작...`);
       try {
         if (!foundItem) {
+          // 🟢 [수정] yf 변수 사용
           const searchResult = await yf.search(assetTicker);
           foundItem = searchResult.quotes[0];
         }
@@ -70,6 +72,7 @@ export const addTransaction: RequestHandler = async (
             message: `Yahoo에서 '${assetTicker}'를 찾을 수 없습니다.`,
           });
 
+        // 🟢 [수정] yf 변수 사용
         const summary = await yf.quoteSummary(foundItem.symbol, {
           modules: ["summaryProfile", "topHoldings", "fundProfile"],
         });
