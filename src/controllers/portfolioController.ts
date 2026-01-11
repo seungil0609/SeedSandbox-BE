@@ -3,10 +3,11 @@ import type { AuthRequest } from "../middleware/authMiddleware.js";
 import Portfolio from "../models/Portfolio.js";
 import Transaction from "../models/Transaction.js";
 import Asset from "../models/Asset.js";
-import { createRequire } from "module";
+// 🟢 [수정] require 제거
+import yahooFinance from "../config/yahooFinance.js";
 
-const require = createRequire(import.meta.url);
-const YahooFinance = require("yahoo-finance2").default;
+// 🟢 [추가] 전역으로 yf 선언 (모든 함수에서 공통 사용)
+const yf = yahooFinance as any;
 
 type HistoricalData = { date: string; value: number };
 
@@ -83,11 +84,11 @@ const generateDateRange = (start: Date, end: Date): string[] => {
   return dates;
 };
 
+// 🟢 [수정] yf 인자 제거 (전역 변수 사용)
 const buildHistoricalAndMarketData = async (
   transactions: any[],
   tickers: string[],
-  yf: any,
-  options?: ChartQueryOptions
+  options?: any
 ): Promise<{ historicalChartData: HistoricalData[] }> => {
   let historicalChartData: HistoricalData[] = [];
   const today = new Date();
@@ -105,11 +106,8 @@ const buildHistoricalAndMarketData = async (
   const normalizedRange = normalizeRange(options?.range);
   const rangeStart = rangeStartDate(normalizedRange, today);
 
-  // 사용자가 요청한 기간 vs 최초 거래일 중 더 늦은 날짜 사용? (X)
-  // 정규화를 위해 사용자가 요청한 기간(Range)을 우선시하되, 데이터가 없으면 0으로 채움.
   let startDate = rangeStart || parsedStart || earliestTxDate;
 
-  // max인 경우 최초 거래일 사용
   if (normalizedRange === "max" && earliestTxDate < startDate) {
     startDate = earliestTxDate;
   }
@@ -117,12 +115,13 @@ const buildHistoricalAndMarketData = async (
   const endDate = today;
   if (startDate > endDate) return { historicalChartData };
 
-  const fetchInterval = "1d"; // 기본 1일 단위로 가져옴
+  const fetchInterval = "1d";
 
   // 2. 야후 파이낸스 데이터 조회
   const historicalResults: Record<string, { date: Date; close: number }[]> = {};
   for (const ticker of tickers) {
     try {
+      // 🟢 전역 변수 yf 사용
       const tickerData = await yf.historical(ticker, {
         period1: formatDateToYMD(startDate),
         period2: formatDateToYMD(endDate),
@@ -172,8 +171,7 @@ const buildHistoricalAndMarketData = async (
     }
   }
 
-  // 5. 날짜별 포트폴리오 가치 계산 (Zero Filling)
-  // 사용자가 요청한 기간의 모든 날짜 생성
+  // 5. 날짜별 포트폴리오 가치 계산
   const fullDateRange = generateDateRange(startDate, endDate);
   const currentQuantities = new Map(initialQuantities);
   const lastKnownPrices = new Map<string, number>();
@@ -181,7 +179,6 @@ const buildHistoricalAndMarketData = async (
   const rawValues: { date: string; value: number }[] = [];
 
   for (const dateStr of fullDateRange) {
-    // 수량 업데이트
     if (quantityChangeMap.has(dateStr)) {
       const changes = quantityChangeMap.get(dateStr)!;
       for (const [ticker, change] of changes.entries()) {
@@ -192,7 +189,6 @@ const buildHistoricalAndMarketData = async (
       }
     }
 
-    // 가격 업데이트
     const pricesForDay = priceMap.get(dateStr);
     if (pricesForDay) {
       for (const [ticker, price] of pricesForDay.entries()) {
@@ -200,11 +196,10 @@ const buildHistoricalAndMarketData = async (
       }
     }
 
-    // 총 가치 계산
     let totalValue = 0;
     for (const [ticker, qty] of currentQuantities.entries()) {
       if (qty > 0) {
-        const price = lastKnownPrices.get(ticker) || 0; // 가격 없으면 0
+        const price = lastKnownPrices.get(ticker) || 0;
         totalValue += qty * price;
       }
     }
@@ -212,45 +207,25 @@ const buildHistoricalAndMarketData = async (
     rawValues.push({ date: dateStr, value: totalValue });
   }
 
-  // 6. 데이터 정규화 (Normalization) - 수익률(%) 변환
-  // 기준점: 데이터 중 "최초로 가치가 0이 아닌 지점"의 가치
+  // 6. 데이터 정규화
   let baseValue = 0;
   const firstNonZero = rawValues.find((v) => v.value > 0);
   if (firstNonZero) baseValue = firstNonZero.value;
 
   const normalizedData = rawValues.map((point) => {
     let normalizedValue = 0;
-
-    // 아직 투자를 시작하지 않은 구간(0원) -> 0%
     if (point.value === 0) {
       normalizedValue = 0;
-    }
-    // 투자를 시작한 이후 -> (현재가치 - 기준가치) / 기준가치 * 100
-    else if (baseValue > 0) {
+    } else if (baseValue > 0) {
       normalizedValue = ((point.value - baseValue) / baseValue) * 100;
     }
-
     return { date: point.date, value: Number(normalizedValue.toFixed(2)) };
   });
-
-  // 7. 인터벌 리샘플링 (1d가 아닌 경우)
-  // 여기서는 간단하게 해당 인터벌의 마지막 날짜 데이터만 남김
-  /* 
-     주의: 정규화된 데이터이므로 단순 합산하면 안됨. 
-     특정 시점(주말, 월말)의 스냅샷을 가져와야 함.
-  */
-
-  if (options?.interval && options.interval !== "1d") {
-    // 리샘플링 로직은 일단 생략하고 1d로 전체 반환 (프론트에서 처리 가능)
-    // 필요 시 bucketKeyForInterval 로직 사용하여 마지막 값 pick
-  }
 
   return { historicalChartData: normalizedData };
 };
 
-// ... (나머지 컨트롤러 함수들은 기존 코드와 동일하므로 유지) ...
-// createPortfolio, getMyPortfolios, getPortfolioById, updatePortfolio, deletePortfolio,
-// getPortfolioSummary, getAssetDetails, runSimulation
+// Controller Functions
 
 export const createPortfolio = async (req: AuthRequest, res: Response) => {
   try {
@@ -383,20 +358,16 @@ export const getPortfolioSummary = async (req: AuthRequest, res: Response) => {
       .filter((h: any) => h.qty > 0)
       .map((h: any) => h.ticker) as string[];
 
-    const yf = new YahooFinance({
-      suppressNotices: ["yahooSurvey", "ripHistorical"],
-    });
-
     const priceMap = new Map<string, number>();
-    let exchangeRate = 1300; // 기본값 안전장치
+    let exchangeRate = 1300;
 
     // 2. 현재가 및 환율 조회
     if (activeTickers.length > 0) {
       const symbolsToFetch = [...activeTickers];
-      // 🟢 [수정] 환율 정보를 항상 가져오도록 추가 (KRW=X: 달러 대비 원화 환율)
       symbolsToFetch.push("KRW=X");
 
       try {
+        // 🟢 [수정] new 키워드 제거, 전역 변수 yf 사용
         const results = await yf.quote(symbolsToFetch);
         const quotes = Array.isArray(results) ? results : [results];
         quotes.forEach((q: any) => {
@@ -420,18 +391,13 @@ export const getPortfolioSummary = async (req: AuthRequest, res: Response) => {
       const currentPrice =
         priceMap.get(ticker) || holding.totalCost / holding.qty || 0;
 
-      // 🟢 [핵심 수정] 양방향 환율 적용 로직
       let applyRate = 1;
 
-      // Case A: 내 포폴(KRW)인데 자산이 달러(USD) -> 곱하기 (환전)
       if (baseCurrency === "KRW" && holding.currency === "USD") {
         applyRate = exchangeRate;
-      }
-      // Case B: 내 포폴(USD)인데 자산이 원화(KRW) -> 나누기 (역환전)
-      else if (baseCurrency === "USD" && holding.currency === "KRW") {
+      } else if (baseCurrency === "USD" && holding.currency === "KRW") {
         applyRate = 1 / exchangeRate;
       }
-      // Case C: 통화가 같으면 1 (그대로)
 
       const valuation = holding.qty * currentPrice * applyRate;
       const adjustedCost = holding.totalCost * applyRate;
@@ -439,7 +405,6 @@ export const getPortfolioSummary = async (req: AuthRequest, res: Response) => {
       totalInvestment += adjustedCost;
       currentValuation += valuation;
 
-      // 섹터 비중 계산
       let weights = holding.sectorWeights;
       if (weights instanceof Map) {
         weights = Object.fromEntries(weights);
@@ -467,7 +432,7 @@ export const getPortfolioSummary = async (req: AuthRequest, res: Response) => {
         averagePrice: holding.totalCost / holding.qty,
         currentPrice,
         currency: holding.currency,
-        totalValue: valuation, // 환산된 가치
+        totalValue: valuation,
         returnRate:
           adjustedCost > 0
             ? ((valuation - adjustedCost) / adjustedCost) * 100
@@ -529,9 +494,7 @@ export const getAssetDetails = async (req: AuthRequest, res: Response) => {
       }
     });
 
-    const yf = new YahooFinance({
-      suppressNotices: ["yahooSurvey", "ripHistorical"],
-    });
+    // 🟢 [수정] new 제거, 전역 변수 yf 사용
     const quote = await yf.quote(assetTicker);
     const currentPrice =
       quote?.regularMarketPrice || (totalQty > 0 ? totalCost / totalQty : 0);
@@ -540,6 +503,7 @@ export const getAssetDetails = async (req: AuthRequest, res: Response) => {
     const oneMonthAgo = new Date();
     oneMonthAgo.setMonth(today.getMonth() - 1);
 
+    // 🟢 [수정] yf 사용
     const chartResult = await yf.chart(assetTicker, {
       period1: formatDateToYMD(oneMonthAgo),
       period2: formatDateToYMD(today),
@@ -613,15 +577,14 @@ export const getPortfolioChartData = async (
     });
     const tickers = Array.from(tickersSet);
 
-    const yf = new YahooFinance({
-      suppressNotices: ["yahooSurvey", "ripHistorical"],
-    });
+    // 🟢 [수정] new 키워드 삭제됨 (이미 yf 전역 변수 있음)
+
     const { startDate, interval, range } = req.query as any;
 
+    // 🟢 [수정] 함수 호출 시 yf 인자 제거 (함수 내부에서 전역 yf 사용)
     const { historicalChartData } = await buildHistoricalAndMarketData(
       transactions,
       tickers,
-      yf,
       { startDate, range, interval }
     );
 
